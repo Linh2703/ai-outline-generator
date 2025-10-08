@@ -9,7 +9,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import heroImage from "@/assets/hero-outline.jpg";
+import OutlineDisplay from "./OutlineDisplay";
 
 const formSchema = z.object({
   topic: z.string().min(3, "Topic must be at least 3 characters").max(200, "Topic must be less than 200 characters"),
@@ -19,23 +21,73 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
+interface OutlineSection {
+  section: string;
+  heading: string;
+  key_points: string[];
+  suggested_word_count: number;
+}
+
+interface OutlineData {
+  title_options: string[];
+  introduction: string;
+  sections: OutlineSection[];
+  conclusion: string;
+  suggestions?: string[];
+}
+
 export default function HeroSection() {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedOutline, setGeneratedOutline] = useState<OutlineData | null>(null);
   
-  const { register, handleSubmit, formState: { errors }, setValue, watch } = useForm<FormData>({
+  const { register, handleSubmit, formState: { errors }, setValue } = useForm<FormData>({
     resolver: zodResolver(formSchema),
   });
 
   const onSubmit = async (data: FormData) => {
     setIsGenerating(true);
-    console.log("Generating outline for:", data);
+    setGeneratedOutline(null);
     
-    // Simulate API call
-    setTimeout(() => {
-      setIsGenerating(false);
+    try {
+      const { data: outlineData, error } = await supabase.functions.invoke("generate-outline", {
+        body: {
+          topic: data.topic,
+          tone: data.tone,
+          audience: data.audience,
+        },
+      });
+
+      if (error) {
+        console.error("Error generating outline:", error);
+        
+        if (error.message?.includes("429") || error.message?.includes("rate limit")) {
+          toast.error("Rate limit exceeded. Please try again in a moment.");
+        } else if (error.message?.includes("402") || error.message?.includes("payment")) {
+          toast.error("Please add credits to continue using AI features.");
+        } else {
+          toast.error("Failed to generate outline. Please try again.");
+        }
+        return;
+      }
+
+      if (outlineData?.error) {
+        toast.error(outlineData.error);
+        return;
+      }
+
+      setGeneratedOutline(outlineData);
       toast.success("Outline generated successfully!");
-      // In a real implementation, this would call the AI API
-    }, 2000);
+      
+      // Scroll to the outline
+      setTimeout(() => {
+        document.getElementById("outline-result")?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    } catch (err) {
+      console.error("Error:", err);
+      toast.error("An unexpected error occurred. Please try again.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -158,6 +210,13 @@ export default function HeroSection() {
             />
           </div>
         </div>
+
+        {/* Outline Display */}
+        {generatedOutline && (
+          <div id="outline-result" className="mt-12">
+            <OutlineDisplay outline={generatedOutline} />
+          </div>
+        )}
       </div>
     </section>
   );
